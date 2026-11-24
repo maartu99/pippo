@@ -17,14 +17,16 @@ let L = null;
 // ---------------------------------------------------------------- input
 const inp = { ax: 0, ay: 0, jump: false, jumpPressed: false, jumpReleased: false };
 const keys = {};
-addEventListener('keydown', e => { if (!keys[e.code] && (e.code === 'Space' || e.code === 'KeyZ' || e.code === 'ArrowUp' && false)) inp.jumpPressed = true; keys[e.code] = true; if (e.code === 'Space') e.preventDefault(); });
+addEventListener('keydown', e => { audioStart(); if (e.code === 'KeyM') toggleSound(); if (!keys[e.code] && (e.code === 'Space' || e.code === 'KeyZ' || e.code === 'ArrowUp' && false)) inp.jumpPressed = true; keys[e.code] = true; if (e.code === 'Space') e.preventDefault(); });
 addEventListener('keyup', e => { if (e.code === 'Space' || e.code === 'KeyZ') inp.jumpReleased = true; keys[e.code] = false; });
 const touch = { stick: null, so: { x: 0, y: 0 }, sp: { x: 0, y: 0 }, jumpId: null, glow: 0 };
 function tpos(t) { return { x: t.clientX, y: t.clientY }; }
 cv.addEventListener('touchstart', e => {
   e.preventDefault();
+  audioStart();
   for (const t of e.changedTouches) {
     const p = tpos(t);
+    if (p.x < 60 && p.y < 60) { toggleSound(); continue; }
     if (p.x < innerWidth / 2 && touch.stick === null) { touch.stick = t.identifier; touch.so = p; touch.sp = p; }
     else if (p.x >= innerWidth / 2 && touch.jumpId === null) { touch.jumpId = t.identifier; inp.jumpPressed = true; }
   }
@@ -44,7 +46,7 @@ function tend(e) {
 cv.addEventListener('touchend', tend, { passive: false });
 cv.addEventListener('touchcancel', tend, { passive: false });
 document.addEventListener('gesturestart', e => e.preventDefault());
-cv.addEventListener('mousedown', () => { if (state === 'fine') restart(); });
+cv.addEventListener('mousedown', e => { audioStart(); if (e.clientX < 60 && e.clientY < 60) toggleSound(); if (state === 'fine') restart(); });
 function readInput() {
   let ax = 0, ay = 0;
   if (keys.ArrowLeft || keys.KeyA) ax -= 1;
@@ -61,6 +63,70 @@ function readInput() {
   inp.ax = ax; inp.ay = ay;
   inp.jump = !!(keys.Space || keys.KeyZ || touch.jumpId !== null);
 }
+
+
+// ---------------------------------------------------------------- suoni (sintetizzati, nessun file)
+const SND = { ctx: null, master: null, music: null, on: true, step: 0, next: 0 };
+function audioStart() {
+  if (SND.ctx) { if (SND.ctx.state !== 'running') SND.ctx.resume(); return; }
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return;
+  SND.ctx = new AC();
+  SND.master = SND.ctx.createGain(); SND.master.gain.value = SND.on ? 0.5 : 0; SND.master.connect(SND.ctx.destination);
+  SND.music = SND.ctx.createGain(); SND.music.gain.value = 0.16; SND.music.connect(SND.master);
+  SND.next = SND.ctx.currentTime + 0.1;
+}
+function tone(type, f0, f1, dur, vol, dest, when) {
+  const c = SND.ctx; if (!c) return;
+  const t0 = when || c.currentTime;
+  const o = c.createOscillator(), g = c.createGain();
+  o.type = type; o.frequency.setValueAtTime(f0, t0);
+  if (f1 !== f0) o.frequency.exponentialRampToValueAtTime(f1, t0 + dur);
+  g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(vol, t0 + 0.008);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  o.connect(g); g.connect(dest || SND.master); o.start(t0); o.stop(t0 + dur + 0.02);
+}
+function noise(dur, vol, freq, q, dest, when) {
+  const c = SND.ctx; if (!c) return;
+  const t0 = when || c.currentTime;
+  const n = Math.floor(c.sampleRate * dur), bf = c.createBuffer(1, n, c.sampleRate), d = bf.getChannelData(0);
+  for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / n);
+  const s = c.createBufferSource(), f = c.createBiquadFilter(), g = c.createGain();
+  s.buffer = bf; f.type = 'bandpass'; f.frequency.value = freq; f.Q.value = q || 1; g.gain.value = vol;
+  s.connect(f); f.connect(g); g.connect(dest || SND.master); s.start(t0);
+}
+const sfx = {
+  salto: () => { tone('square', 330, 660, 0.12, 0.10); tone('triangle', 660, 990, 0.10, 0.05); },
+  atterra: () => { noise(0.06, 0.18, 220, 1.2); },
+  passo: () => { noise(0.03, 0.05, 1800, 2); },
+  corda: () => { noise(0.05, 0.10, 900, 3); tone('triangle', 180, 150, 0.05, 0.03); },
+  carica: () => { tone('sawtooth', 220, 440, 0.8, 0.035); tone('square', 880, 880, 0.05, 0.03); },
+  schiaffo: () => { noise(0.16, 0.6, 1400, 0.7); noise(0.10, 0.4, 3200, 1.5); tone('sine', 120, 50, 0.22, 0.45); },
+  resiste: () => { noise(0.14, 0.45, 1400, 0.7); tone('square', 140, 120, 0.1, 0.08); },
+  puff: () => { noise(0.25, 0.25, 500, 0.6); },
+  crac: () => { noise(0.08, 0.6, 2500, 2); tone('square', 90, 40, 0.18, 0.3); },
+  denti: () => { noise(0.04, 0.18, 2200, 3); },
+  fine: () => { [262, 311, 392, 523].forEach((f, i) => tone('triangle', f, f, 1.4, 0.10, SND.master, SND.ctx.currentTime + i * 0.12)); },
+};
+function play(n) { if (SND.ctx && SND.on) try { sfx[n](); } catch (e) {} }
+// musichetta: basso pulsante in minore, arpeggio inquieto, tic-tac. Volume basso.
+const BASS = [45, 45, 45, 45, 41, 41, 43, 43];             // La, Fa, Sol (MIDI)
+const ARP = [[69, 72, 76, 72], [69, 72, 76, 75], [65, 69, 72, 69], [67, 71, 74, 71]];
+const midi = m => 440 * Math.pow(2, (m - 69) / 12);
+function musicTick() {
+  const c = SND.ctx; if (!c || state === 'fine') return;
+  const spb = 60 / 132 / 2;                                  // crome a 132 bpm
+  while (SND.next < c.currentTime + 0.2) {
+    const s = SND.step, w = SND.next, bar = Math.floor(s / 8) % 8;
+    if (s % 2 === 0) tone('triangle', midi(BASS[bar] - 12), midi(BASS[bar] - 12), spb * 1.6, 0.30, SND.music, w);
+    const arp = ARP[Math.floor(bar / 2)];
+    tone('square', midi(arp[s % 4]), midi(arp[s % 4]), spb * 0.7, (s % 4 === 0) ? 0.07 : 0.045, SND.music, w);
+    noise(0.025, s % 2 ? 0.05 : 0.09, 6000, 1.5, SND.music, w);
+    if (s % 16 === 12) tone('sine', midi(BASS[bar] + 13), midi(BASS[bar] + 13), spb * 2, 0.05, SND.music, w);   // nota storta, ansia
+    SND.step++; SND.next += spb;
+  }
+}
+function toggleSound() { SND.on = !SND.on; if (SND.master) SND.master.gain.value = SND.on ? 0.5 : 0; }
 
 // ---------------------------------------------------------------- stato
 const G = 620, JUMP = 236, RUN = 88, ACC = 900, CLIMB = 46;
@@ -99,15 +165,15 @@ function update(dt) {
     const r = L.ropes[P.rope];
     P.x = r.x;
     const v = inp.ay < -0.3 ? -CLIMB : inp.ay > 0.3 ? CLIMB * 1.4 : (inp.ax !== 0 && !BOT ? 0 : 0);
-    P.y += v * dt; P.climbd += Math.abs(v * dt);
+    P.y += v * dt; { const c0 = Math.floor(P.climbd / 10); P.climbd += Math.abs(v * dt); if (Math.floor(P.climbd / 10) !== c0) play('corda'); }
     if (P.y <= r.y0) { P.y = r.y0 - 14; P.mode = 'normale'; P.vy = 0; P.x = r.x + (inp.ax < 0 ? -6 : 6); }
     else if (P.y >= r.y1) { P.y = r.y1; P.mode = 'normale'; }
-    if (inp.jumpPressed) { P.mode = 'normale'; P.vy = -JUMP * 0.75; P.vx = (inp.ax || P.face) * RUN; P.ropeCool = 0.3; }
+    if (inp.jumpPressed) { play('salto'); P.mode = 'normale'; P.vy = -JUMP * 0.75; P.vx = (inp.ax || P.face) * RUN; P.ropeCool = 0.3; }
   } else {
     if (P.ground) P.coyote = 0.1; else P.coyote -= dt;
     P.buffer -= dt;
     if (inp.jumpPressed && !(danger && P.ground)) P.buffer = 0.12;
-    if (P.buffer > 0 && P.coyote > 0) { P.vy = -JUMP; P.buffer = 0; P.coyote = 0; P.ground = false; }
+    if (P.buffer > 0 && P.coyote > 0) { play('salto'); P.vy = -JUMP; P.buffer = 0; P.coyote = 0; P.ground = false; }
     if (inp.jumpReleased && P.vy < -60) P.vy *= 0.5;
     P.cling = P.ground && inp.jump && (danger || P.hold > 0.15);
     const want = P.cling ? 0 : inp.ax * RUN;
@@ -143,10 +209,11 @@ function move(dt) {
   P.y += P.vy * dt;
   P.ground = false; P.plat = -1;
   if (P.vy >= 0) {
-    if (P.y >= L.ground) { P.y = L.ground; P.vy = 0; P.ground = true; }
+    if (P.y >= L.ground) { if (P.vy > 120) play('atterra'); P.y = L.ground; P.vy = 0; P.ground = true; }
     if (!(P.stun > 0.35)) for (let i = 0; i < L.plats.length; i++) {
       const p = L.plats[i];
       if (P.x > p.x + 2 && P.x < p.x + p.w - 2 && prev <= p.y + 0.5 && P.y >= p.y) {
+        if (P.vy > 120) play('atterra');
         P.y = p.y; P.vy = 0; P.ground = true; P.plat = i; break;
       }
     }
@@ -170,7 +237,7 @@ function updateArms(dt) {
       const reach = Math.hypot(tx - a.sh.x, ty - a.sh.y) < L1 + L2 - 30;
       const other = arms.some(o => o !== a && o.state !== 0);
       if (a.cool <= 0 && mine && reach && !other && state === 'gioco' && P.mode !== 'corda' && P.stun <= 0) {
-        a.state = 1; a.t = 0; a.from = { ...a.hand }; a.hit = false;
+        a.state = 1; a.t = 0; a.from = { ...a.hand }; a.hit = false; play('carica');
       }
     } else if (a.state === 1) {          // carica: la mano sale di lato e trema
       const k = Math.min(a.t / 0.85, 1), e = k * k * (3 - 2 * k);
@@ -182,13 +249,13 @@ function updateArms(dt) {
       a.hand = { x: a.from.x + (a.to.x - a.from.x) * k, y: a.from.y + (a.to.y - a.from.y) * k };
       if (!a.hit && P.mode !== 'corda' && Math.hypot(a.hand.x - tx, a.hand.y - ty) < 20) {
         a.hit = true; shake = 0.25;
-        if (P.cling) { puffs.push({ x: tx, y: ty - 10, t: 0, w: 'SCHIAFF!' }); say('si aggrappa e resiste', 1.5); }
+        if (P.cling) { play('resiste'); puffs.push({ x: tx, y: ty - 10, t: 0, w: 'SCHIAFF!' }); say('si aggrappa e resiste', 1.5); }
         else {
-          puffs.push({ x: tx, y: ty - 10, t: 0, w: 'SCHIAFF!' });
+          play('schiaffo'); puffs.push({ x: tx, y: ty - 10, t: 0, w: 'SCHIAFF!' });
           P.mode = 'normale'; P.stun = 0.6; P.spin = 0; P.vx = -a.side * 150; P.vy = -170;
         }
       }
-      if (a.t >= 0.16) { if (!a.hit) puffs.push({ x: a.hand.x, y: a.hand.y, t: 0, w: 'PUFF!' }); a.state = 3; a.t = 0; }
+      if (a.t >= 0.16) { if (!a.hit) play('puff'); if (!a.hit) puffs.push({ x: a.hand.x, y: a.hand.y, t: 0, w: 'PUFF!' }); a.state = 3; a.t = 0; }
     } else if (a.state === 3) { if (a.t > 0.35) { a.state = 4; a.t = 0; a.from = { ...a.hand }; } }
     else if (a.state === 4) {
       const k = Math.min(a.t / 0.8, 1), e = k * k * (3 - 2 * k);
@@ -211,15 +278,17 @@ function elbow(a) {
 // ---------------------------------------------------------------- denti e bocca
 function updateTeeth(dt) {
   const c = (t % 3.4);
+  const prevK = teethK;
   teethK = c < 2.2 ? 0 : c < 2.32 ? (c - 2.2) / 0.12 : c < 2.9 ? 1 : 1 - (c - 2.9) / 0.5;
+  if (prevK < 0.5 && teethK >= 0.5 && Math.abs(P.y - L.mouth.y1) < 200) play('denti');
   const m = L.mouth;
   const inside = P.x > m.x0 + 6 && P.x < m.x1 - 6 && P.y > m.y0 && P.y <= m.y1 && P.y - 28 < m.y1;
   if (state === 'gioco' && inside && P.stun <= 0) {
     if (teethK > 0.7) {
-      puffs.push({ x: P.x, y: P.y - 20, t: 0, w: 'CRAC!' }); shake = 0.3;
+      play('crac'); puffs.push({ x: P.x, y: P.y - 20, t: 0, w: 'CRAC!' }); shake = 0.3;
       P.stun = 0.6; P.vx = (P.x < (m.x0 + m.x1) / 2 ? -1 : 1) * 140; P.vy = -120;
     } else if (Math.abs(P.x - (m.x0 + m.x1) / 2) < 10 && P.ground) {
-      state = 'fine'; finT = 0; say('', 0);
+      state = 'fine'; finT = 0; say('', 0); play('fine');
     }
   }
 }
@@ -231,7 +300,7 @@ function pippoFrame() {
   if (P.mode === 'corda') return inp.ay !== 0 ? 'climb' + (Math.floor(P.climbd / 5) % 4) : 'hang';
   if (!P.ground) return P.vy < 0 ? 'jump' : 'fall';
   if (P.cling) return 'cling';
-  if (Math.abs(P.vx) > 12) { P.anim += Math.abs(P.vx) * 0.0016; return 'run' + (Math.floor(P.anim * 6) % 4); }
+  if (Math.abs(P.vx) > 12) { const a0 = Math.floor(P.anim * 6); P.anim += Math.abs(P.vx) * 0.0016; const a1 = Math.floor(P.anim * 6); if (a1 !== a0 && a1 % 2 === 0) play('passo'); return 'run' + (a1 % 4); }
   return 'idle' + (Math.floor(t * 1.6) % 2);
 }
 function draw() {
@@ -366,6 +435,12 @@ function drawArm(a, cx, cy) {
 }
 function drawControls() {
   if (BOT) return;
+  ctx.save(); ctx.scale(devicePixelRatio, devicePixelRatio);
+  ctx.strokeStyle = ctx.fillStyle = 'rgba(232,226,210,0.45)'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(18, 24); ctx.lineTo(23, 24); ctx.lineTo(29, 19); ctx.lineTo(29, 37); ctx.lineTo(23, 32); ctx.lineTo(18, 32); ctx.closePath(); ctx.fill();
+  if (SND.on) { ctx.beginPath(); ctx.arc(30, 28, 6, -0.9, 0.9); ctx.stroke(); ctx.beginPath(); ctx.arc(30, 28, 11, -0.9, 0.9); ctx.stroke(); }
+  else { ctx.beginPath(); ctx.moveTo(34, 23); ctx.lineTo(42, 33); ctx.moveTo(42, 23); ctx.lineTo(34, 33); ctx.stroke(); }
+  ctx.restore();
   const s = innerWidth / VW >= 1 ? 1 : 1;
   ctx.save();
   ctx.scale(devicePixelRatio, devicePixelRatio);
@@ -433,6 +508,7 @@ function loop(ts) {
   const dt = Math.min(0.05, (ts - last) / 1000 || 0); last = ts;
   acc += dt * FAST;
   while (acc >= 1 / 120) { update(1 / 120); acc -= 1 / 120; }
+  if (SND.ctx && SND.on) musicTick();
   draw();
   ctx.imageSmoothingEnabled = false;
   ctx.fillStyle = '#07060c'; ctx.fillRect(0, 0, cv.width, cv.height);
@@ -446,7 +522,7 @@ Promise.all([fetch('livello.json').then(r => r.json()), ...NAMES.map(n => new Pr
   const i = new Image(); i.onload = () => { IMG[n] = i; res(); }; i.src = 'img/' + n + '.png';
 }))]).then(([lvl]) => {
   L = lvl; resize(); initArms(); restart();
-  window.__g = { P, L, get state() { return state; }, get t() { return t; }, cam, get botCur() { return botCur; } };
+  window.__g = { P, L, get state() { return state; }, get t() { return t; }, cam, get botCur() { return botCur; }, get suono() { return SND.ctx ? SND.ctx.state + ' ' + SND.step : 'spento'; } };
   requestAnimationFrame(loop);
 });
 })();
