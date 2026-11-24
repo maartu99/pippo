@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Shards of Pippo</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #07060c; overflow: hidden; touch-action: none;
+    -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; overscroll-behavior: none; }
+  canvas { display: block; width: 100vw; height: 100vh; image-rendering: pixelated; }
+  #gira { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; text-align: center;
+    background: #0c0a16; color: #e8e2d2; font: 600 20px/1.5 -apple-system, system-ui, sans-serif; padding: 24px; }
+  @media (orientation: portrait) { #gira { display: flex; } }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="gira">Gira il telefono in orizzontale</div>
+<script src="gioco.js"></script>
+</body>
+</html>
