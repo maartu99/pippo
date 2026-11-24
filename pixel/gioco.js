@@ -38,6 +38,7 @@ cv.addEventListener('touchmove', e => {
 }, { passive: false });
 function tend(e) {
   e.preventDefault();
+  audioStart();
   for (const t of e.changedTouches) {
     if (t.identifier === touch.stick) touch.stick = null;
     if (t.identifier === touch.jumpId) { touch.jumpId = null; inp.jumpReleased = true; }
@@ -45,6 +46,8 @@ function tend(e) {
 }
 cv.addEventListener('touchend', tend, { passive: false });
 cv.addEventListener('touchcancel', tend, { passive: false });
+document.addEventListener('click', () => audioStart());
+document.addEventListener('visibilitychange', () => { if (!document.hidden && SND.ctx) SND.ctx.resume(); });
 document.addEventListener('gesturestart', e => e.preventDefault());
 cv.addEventListener('mousedown', e => { audioStart(); if (e.clientX < 60 && e.clientY < 60) toggleSound(); if (state === 'fine') restart(); });
 function readInput() {
@@ -68,13 +71,35 @@ function readInput() {
 // ---------------------------------------------------------------- suoni (sintetizzati, nessun file)
 const SND = { ctx: null, master: null, music: null, on: true, step: 0, next: 0 };
 function audioStart() {
-  if (SND.ctx) { if (SND.ctx.state !== 'running') SND.ctx.resume(); return; }
+  // iPhone: l'audio si sblocca solo dentro un gesto (meglio a fine tocco) e
+  // con l'interruttore silenzioso attivo serve la sessione "playback".
+  try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) {}
+  if (!SND.el) {
+    // traccia silenziosa in loop: su iOS fa passare l'audio della pagina come "media"
+    const sr = 8000, n = sr / 2, buf = new ArrayBuffer(44 + n * 2), v = new DataView(buf);
+    const w = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+    w(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); w(8, 'WAVEfmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true);
+    v.setUint16(22, 1, true); v.setUint32(24, sr, true); v.setUint32(28, sr * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+    w(36, 'data'); v.setUint32(40, n * 2, true);
+    SND.el = new Audio(URL.createObjectURL(new Blob([buf], { type: 'audio/wav' })));
+    SND.el.loop = true; SND.el.setAttribute('playsinline', '');
+  }
+  try { const p = SND.el.play(); if (p && p.catch) p.catch(() => {}); } catch (e) {}
   const AC = window.AudioContext || window.webkitAudioContext;
   if (!AC) return;
-  SND.ctx = new AC();
-  SND.master = SND.ctx.createGain(); SND.master.gain.value = SND.on ? 0.5 : 0; SND.master.connect(SND.ctx.destination);
-  SND.music = SND.ctx.createGain(); SND.music.gain.value = 0.16; SND.music.connect(SND.master);
-  SND.next = SND.ctx.currentTime + 0.1;
+  if (!SND.ctx) {
+    SND.ctx = new AC();
+    SND.master = SND.ctx.createGain(); SND.master.gain.value = SND.on ? 0.9 : 0; SND.master.connect(SND.ctx.destination);
+    SND.music = SND.ctx.createGain(); SND.music.gain.value = 0.3; SND.music.connect(SND.master);
+    SND.next = SND.ctx.currentTime + 0.1;
+  }
+  if (SND.ctx.state !== 'running') { try { SND.ctx.resume(); } catch (e) {} }
+  // buffer muto suonato dentro il gesto: sblocca il contesto su Safari/Chrome iOS
+  try {
+    const b0 = SND.ctx.createBuffer(1, 1, 22050), s0 = SND.ctx.createBufferSource();
+    s0.buffer = b0; s0.connect(SND.ctx.destination); s0.start(0);
+  } catch (e) {}
+  if (SND.next < SND.ctx.currentTime) SND.next = SND.ctx.currentTime + 0.05;
 }
 function tone(type, f0, f1, dur, vol, dest, when) {
   const c = SND.ctx; if (!c) return;
@@ -126,7 +151,7 @@ function musicTick() {
     SND.step++; SND.next += spb;
   }
 }
-function toggleSound() { SND.on = !SND.on; if (SND.master) SND.master.gain.value = SND.on ? 0.5 : 0; }
+function toggleSound() { SND.on = !SND.on; if (SND.master) SND.master.gain.value = SND.on ? 0.9 : 0; }
 
 // ---------------------------------------------------------------- stato
 const G = 620, JUMP = 236, RUN = 88, ACC = 900, CLIMB = 46;
